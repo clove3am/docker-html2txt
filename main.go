@@ -10,6 +10,36 @@ import (
 	"time"
 )
 
+// The HTML for the form page. We embed it here for simplicity.
+const formHTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML to Text Converter</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f4f9; color: #333; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        h1 { color: #5a5a5a; }
+        input[type="url"] { width: 300px; padding: 0.5rem; margin-top: 1rem; border: 1px solid #ccc; border-radius: 4px; }
+        input[type="submit"] { padding: 0.6rem 1.2rem; margin-left: 0.5rem; border: none; background-color: #007bff; color: white; border-radius: 4px; cursor: pointer; }
+        input[type="submit"]:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>HTML to Text Converter</h1>
+        <p>Enter a URL to get its text-only version.</p>
+        <form action="/" method="GET">
+            <input type="url" id="url" name="url" placeholder="https://example.com" required>
+            <input type="submit" value="Convert">
+        </form>
+    </div>
+</body>
+</html>
+`
+
 // isSSRFProne checks if the hostname in a URL resolves to a private, loopback,
 // or otherwise non-public IP address to prevent Server-Side Request Forgery (SSRF).
 func isSSRFProne(targetURL string) (bool, error) {
@@ -36,21 +66,22 @@ func isSSRFProne(targetURL string) (bool, error) {
 }
 
 func textHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the URL from the query string
 	urlToFetch := r.URL.Query().Get("url")
 
-	// --- Initial Validation ---
+	// If no URL is provided in the query, show the HTML form.
 	if urlToFetch == "" {
-		http.Error(w, "Please provide a 'url' query parameter.", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, formHTML)
 		return
 	}
 
+	// --- Security Checks ---
 	if _, err := url.ParseRequestURI(urlToFetch); err != nil {
 		http.Error(w, "Invalid URL format.", http.StatusBadRequest)
 		return
 	}
 
-	// --- SSRF Prevention ---
 	isBlocked, err := isSSRFProne(urlToFetch)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error during security check: %s", err.Error()), http.StatusInternalServerError)
@@ -61,23 +92,19 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	// --- Execute Secure Lynx Command ---
-	// Using the hardened set of flags for stateless and secure execution.
-	// We pass the URL as the final, separate argument to prevent command injection.
 	cmd := exec.Command("lynx",
 		"-dump",
 		"-nonumbers",
 		"-listonly",
-		"-cookie_file=/dev/null", // Discard all cookies
-		"-cache=0",               // Set in-memory cache size to 0
-		"-nolog",                 // Do not create a log file
-		"-nostatus",              // Do not show status messages
-		"-anonymous",             // Use anonymous/generic headers
+		"-cookie_file=/dev/null",
+		"-cache=0",
+		"-nolog",
+		"-nostatus",
+		"-anonymous",
 		urlToFetch,
 	)
 
-	// Execute the command and capture the output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		errMsg := fmt.Sprintf("Error fetching URL with lynx: %v\nOutput:\n%s", err, string(output))
@@ -85,7 +112,6 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the output as plain text
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(output)
 }
