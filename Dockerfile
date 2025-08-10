@@ -1,6 +1,6 @@
 # ---- Stage 1: Build ----
 # Use the official Go image as a build environment
-FROM golang:1.24.6-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies, including git and lynx
 RUN apk add --no-cache git lynx
@@ -8,9 +8,9 @@ RUN apk add --no-cache git lynx
 # Set the working directory
 WORKDIR /app
 
-# Copy the Go module files and download dependencies
-# This now copies both go.mod and go.sum for reproducible builds
-COPY go.mod go.sum ./
+# Copy the Go module files. The wildcard ensures this works
+# whether go.sum exists or not.
+COPY go.* ./
 RUN go mod download
 
 # Copy the source code
@@ -35,4 +35,3 @@ EXPOSE 8080
 
 # The command to run when the container starts.
 CMD ["/html2txt"]
-
