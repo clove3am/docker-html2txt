@@ -76,12 +76,21 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- Security Checks ---
-	if _, err := url.ParseRequestURI(urlToFetch); err != nil {
+	// --- COMPLETE SECURITY CHECKS ---
+	// 1. Parse the URL to inspect its parts.
+	parsedURL, err := url.Parse(urlToFetch)
+	if err != nil {
 		http.Error(w, "Invalid URL format.", http.StatusBadRequest)
 		return
 	}
 
+	// 2. CRITICAL: Check the scheme. Only allow http and https.
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		http.Error(w, "Scheme is not http or https.", http.StatusBadRequest)
+		return
+	}
+	
+	// 3. Check for SSRF attempts.
 	isBlocked, err := isSSRFProne(urlToFetch)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error during security check: %s", err.Error()), http.StatusInternalServerError)
@@ -116,7 +125,6 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(output)
 }
-
 func main() {
 	http.HandleFunc("/", textHandler)
 
