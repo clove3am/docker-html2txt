@@ -95,12 +95,13 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	// --- Execute Secure Lynx Command ---
 	cmd := exec.Command("lynx",
 		"-dump",
-		"-nonumbers",
-		"-listonly",
+		"-force_html",
+		"-display_charset=UTF-8",
+		"-width=1024",
+		"-dont_wrap_pre",
 		"-cookie_file=/dev/null",
 		"-cache=0",
 		"-nolog",
-		"-nostatus",
 		"-anonymous",
 		urlToFetch,
 	)
