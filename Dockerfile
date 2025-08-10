@@ -1,6 +1,6 @@
 # ---- Stage 1: Build ----
 # Use the official Go image as a build environment
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24.6-alpine AS builder
 
 # Install build dependencies, including git and lynx
 RUN apk add --no-cache git lynx
@@ -9,15 +9,14 @@ RUN apk add --no-cache git lynx
 WORKDIR /app
 
 # Copy the Go module files and download dependencies
-# (You would run 'go mod init html2txt-go' in your directory first)
-COPY go.mod ./
+# This now copies both go.mod and go.sum for reproducible builds
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy the source code
 COPY main.go ./
 
-# Build the Go app, creating a static binary.
-# CGO_ENABLED=0 is important for creating a truly static binary.
+# Build the Go app, creating a static binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/html2txt .
 
 
@@ -36,3 +35,4 @@ EXPOSE 8080
 
 # The command to run when the container starts.
 CMD ["/html2txt"]
+
