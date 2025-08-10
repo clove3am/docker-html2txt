@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"time"
 )
+
 
 // The HTML for the form page. We embed it here for simplicity.
 const formHTML = `
@@ -68,7 +70,6 @@ func isSSRFProne(targetURL string) (bool, error) {
 func textHandler(w http.ResponseWriter, r *http.Request) {
 	urlToFetch := r.URL.Query().Get("url")
 
-	// If no URL is provided in the query, show the HTML form.
 	if urlToFetch == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -77,34 +78,47 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- COMPLETE SECURITY CHECKS ---
-	// 1. Parse the URL to inspect its parts.
+	
+	// 1. Check URL length (New)
+	if len(urlToFetch) > 2048 {
+		http.Error(w, "URL is too long.", http.StatusBadRequest)
+		return
+	}
+	
+	// 2. Parse and check the scheme
 	parsedURL, err := url.Parse(urlToFetch)
 	if err != nil {
 		http.Error(w, "Invalid URL format.", http.StatusBadRequest)
 		return
 	}
-
-	// 2. CRITICAL: Check the scheme. Only allow http and https.
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		http.Error(w, "Scheme is not http or https.", http.StatusBadRequest)
 		return
 	}
 	
-	// 3. Check for SSRF attempts.
+	// 3. Check for SSRF attempts
 	isBlocked, err := isSSRFProne(urlToFetch)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error during security check: %s", err.Error()), http.StatusInternalServerError)
+		// Log the detailed error, but don't show it to the user
+		log.Printf("SSRF security check error for %s: %v", urlToFetch, err)
+		http.Error(w, "Internal Server Error during security check.", http.StatusInternalServerError)
 		return
 	}
 	if isBlocked {
-		http.Error(w, "Request blocked: requests to private, loopback, or reserved IP addresses are not allowed.", http.StatusForbidden)
+		http.Error(w, "Request blocked: URL resolves to a private or reserved address.", http.StatusForbidden)
 		return
 	}
 
-	// --- Execute Secure Lynx Command ---
-	cmd := exec.Command("lynx",
+	// --- Execute Secure Lynx Command with Timeout ---
+
+	// Create a context that will be cancelled after 15 seconds
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "lynx",
 		"-dump",
 		"-force_html",
+		"-noredir", // Do not follow redirects
 		"-display_charset=UTF-8",
 		"-width=1024",
 		"-dont_wrap_pre",
@@ -117,14 +131,18 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		errMsg := fmt.Sprintf("Error fetching URL with lynx: %v\nOutput:\n%s", err, string(output))
-		http.Error(w, errMsg, http.StatusInternalServerError)
+		// Log the detailed error for debugging
+		log.Printf("Lynx command failed for URL %s: %v\nOutput: %s", urlToFetch, err, string(output))
+		
+		// Show a generic error to the user
+		http.Error(w, "Failed to process the requested URL.", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write(output)
 }
+
 func main() {
 	http.HandleFunc("/", textHandler)
 
