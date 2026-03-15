@@ -1,6 +1,6 @@
 # ---- Stage 1: Build ----
 # Use the official Go image as a build environment
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # Install build dependencies, including git and lynx
 RUN apk add --no-cache git lynx
