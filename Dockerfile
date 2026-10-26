@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /app/html2txt .
 
 # ---- Stage 2: Final Image ----
 # Use a minimal base image for the final product.
-FROM alpine:3.24.2
+FROM alpine:3.24.3
 
 # We must install lynx again in our final image as it's a runtime dependency.
 RUN apk add --no-cache lynx
