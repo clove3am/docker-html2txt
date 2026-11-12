@@ -1,16 +1,26 @@
 version: 2
+
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      go-modules:
+        patterns: ["*"]
 
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      docker-images:
+        patterns: ["*"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      github-actions:
+        patterns: ["*"]
