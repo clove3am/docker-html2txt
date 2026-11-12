@@ -1,0 +1,8 @@
+# Binaries and test artifacts.
+/html2txt
+*.test
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
