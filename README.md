@@ -51,6 +51,8 @@ services:
       - "8080:8080"
     restart: unless-stopped
     read_only: true
+    tmpfs:
+      - /tmp
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -97,8 +99,8 @@ The service fetches URLs supplied by users, so it treats every URL as hostile:
 - **Bounded work** – 5 MiB maximum download, 25 second request timeout,
   15 second render timeout, 5 redirects maximum, 16 concurrent conversions and
   an HTTP server with read/write/idle timeouts.
-- **Minimal privileges** – the container runs as a non-root user and needs no
-  writable filesystem.
+- **Minimal privileges** – the container runs as a non-root user and needs only
+  a writable temporary directory for lynx, which can be a tmpfs.
 
 Even so, run it behind a reverse proxy with rate limiting if you expose it to
 the internet, and apply an egress firewall policy to the container's network if
@@ -111,6 +113,32 @@ you want defence in depth.
 - Redirects are limited to 5 hops.
 - Binary content (PDF, images, archives) is rejected rather than converted.
 - Text layout comes from Lynx, so wide pages may look sparse.
+
+## Troubleshooting
+
+**`Failed to convert the requested page.` with `lynx: exit status 1` in the log**
+
+lynx spools documents read from stdin to a temporary file. The service uses
+`/dev/shm` when it is writable (Docker provides it as a tmpfs even with
+`read_only: true`) and falls back to `/tmp`. If both are read-only, give the
+container a writable `/tmp`:
+
+```yaml
+services:
+  html2txt:
+    read_only: true
+    tmpfs:
+      - /tmp
+```
+
+The error message includes lynx's own output, for example
+`stdout: "/tmp/lynxXXXX: Read-only file system"`, and the service logs
+`no writable temporary directory found` at startup when this is the case.
+
+**`Could not resolve the host in the requested URL.`**
+
+The container cannot reach a DNS server, or the hostname does not exist. Check
+the container's network settings.
 
 ## Development
 

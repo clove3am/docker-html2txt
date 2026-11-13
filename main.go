@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"os/signal"
 	"regexp"
@@ -53,6 +54,28 @@ var errBlockedAddress = errors.New("blocked address")
 
 // charsetPattern restricts charset names passed on to lynx to a safe subset.
 var charsetPattern = regexp.MustCompile(`^[A-Za-z0-9._:+-]{1,40}$`)
+
+// lynxTempDir is a writable directory lynx can use for the temporary file it
+// creates for documents read from stdin. /dev/shm is a tmpfs in Docker and
+// Podman and stays writable when the container root filesystem is read-only,
+// in which case /tmp is usually not writable.
+var lynxTempDir = firstWritableDir("/dev/shm", os.TempDir())
+
+// firstWritableDir returns the first directory a file can be created in, or an
+// empty string when none of them is usable.
+func firstWritableDir(dirs ...string) string {
+	for _, dir := range dirs {
+		f, err := os.CreateTemp(dir, ".html2txt-probe-*")
+		if err != nil {
+			continue
+		}
+		name := f.Name()
+		f.Close()
+		os.Remove(name)
+		return dir
+	}
+	return ""
+}
 
 // formHTML is the landing page shown when no URL was supplied.
 const formHTML = `
@@ -299,15 +322,15 @@ func (s *server) fetch(ctx context.Context, target *url.URL) ([]byte, string, er
 
 	mediaType, params, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if !isTextual(mediaType) {
-		return nil, "", fmt.Errorf("unsupported content type %q", mediaType)
+		return nil, "", fmt.Errorf("unsupported content type %q (status %s)", mediaType, resp.Status)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
 	if err != nil {
-		return nil, "", fmt.Errorf("reading response: %w", err)
+		return nil, "", fmt.Errorf("reading response (status %s): %w", resp.Status, err)
 	}
 	if len(body) > maxResponseSize {
-		return nil, "", fmt.Errorf("response exceeds %d bytes", maxResponseSize)
+		return nil, "", fmt.Errorf("response exceeds %d bytes (status %s)", maxResponseSize, resp.Status)
 	}
 
 	charset := params["charset"]
@@ -341,6 +364,11 @@ func htmlToText(ctx context.Context, document []byte, charset string) ([]byte, e
 	cmd := exec.CommandContext(ctx, "lynx", args...)
 	cmd.Stdin = bytes.NewReader(document)
 	cmd.Stderr = &stderr
+	// lynx spools stdin to a temporary file, which fails if TMPDIR is not
+	// writable (for example a read-only root filesystem without /tmp tmpfs).
+	if lynxTempDir != "" {
+		cmd.Env = envWith("TMPDIR", lynxTempDir)
+	}
 	// Make sure a stuck child process cannot keep us waiting forever.
 	cmd.WaitDelay = 2 * time.Second
 
@@ -349,9 +377,32 @@ func htmlToText(ctx context.Context, document []byte, charset string) ([]byte, e
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("lynx timed out: %w", err)
 		}
-		return nil, fmt.Errorf("lynx: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		// lynx reports most problems on stdout in dump mode, so include both.
+		return nil, fmt.Errorf("lynx: %w (stdout: %q, stderr: %q)", err, snippet(out), strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
+}
+
+// envWith returns the current environment with key set to value.
+func envWith(key, value string) []string {
+	prefix := key + "="
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, prefix) {
+			env = append(env, kv)
+		}
+	}
+	return append(env, prefix+value)
+}
+
+// snippet returns a short single-line excerpt of command output for logs.
+func snippet(b []byte) string {
+	s := strings.Join(strings.Fields(string(b)), " ")
+	const max = 200
+	if len(s) > max {
+		return s[:max] + "..."
+	}
+	return s
 }
 
 // serveForm writes the landing page.
@@ -457,6 +508,10 @@ func main() {
 		WriteTimeout:      requestTimeout + 10*time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 16,
+	}
+
+	if lynxTempDir == "" {
+		log.Print("warning: no writable temporary directory found, lynx will fail to render pages")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

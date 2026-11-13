@@ -280,6 +280,50 @@ func TestIsTextual(t *testing.T) {
 	}
 }
 
+func TestFirstWritableDir(t *testing.T) {
+	dir := t.TempDir()
+
+	if got := firstWritableDir("/does/not/exist", dir); got != dir {
+		t.Errorf("firstWritableDir = %q, want %q", got, dir)
+	}
+	if got := firstWritableDir("/does/not/exist"); got != "" {
+		t.Errorf("firstWritableDir = %q, want an empty string", got)
+	}
+}
+
+func TestEnvWith(t *testing.T) {
+	t.Setenv("TMPDIR", "/somewhere/else")
+
+	var found []string
+	for _, kv := range envWith("TMPDIR", "/tmp") {
+		if strings.HasPrefix(kv, "TMPDIR=") {
+			found = append(found, kv)
+		}
+	}
+
+	if len(found) != 1 || found[0] != "TMPDIR=/tmp" {
+		t.Errorf("envWith produced TMPDIR entries %v, want exactly [TMPDIR=/tmp]", found)
+	}
+}
+
+func TestHTMLToTextReportsLynxOutput(t *testing.T) {
+	if _, err := exec.LookPath("lynx"); err != nil {
+		t.Skip("lynx is not installed")
+	}
+
+	// lynx cannot create its temporary file here and reports the problem on
+	// stdout, which must end up in the returned error.
+	original := lynxTempDir
+	lynxTempDir = "/does-not-exist-html2txt"
+	t.Cleanup(func() { lynxTempDir = original })
+
+	if _, err := htmlToText(context.Background(), []byte("<p>hi</p>"), ""); err == nil {
+		t.Fatal("expected an error, got nil")
+	} else if !strings.Contains(err.Error(), "stdout:") {
+		t.Errorf("error should include lynx stdout, got: %v", err)
+	}
+}
+
 func TestHTMLToText(t *testing.T) {
 	if _, err := exec.LookPath("lynx"); err != nil {
 		t.Skip("lynx is not installed")
